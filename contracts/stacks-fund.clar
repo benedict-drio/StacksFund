@@ -254,3 +254,48 @@
         )
     )
 )
+
+(define-public (execute-proposal (proposal-id uint))
+    (begin
+        (try! (check-initialized))
+        (try! (validate-proposal-id proposal-id))
+
+        (let (
+            (proposal (unwrap! (map-get? proposals proposal-id) err-proposal-not-found))
+            (contract-balance (stx-get-balance (as-contract tx-sender)))
+        )
+            (asserts! (not (get executed proposal)) err-unauthorized)
+            (asserts! (>= block-height (get expires-at proposal)) err-proposal-expired)
+            (asserts! (> (get yes-votes proposal) (get no-votes proposal)) err-unauthorized)
+            (asserts! (>= contract-balance (get amount proposal)) err-insufficient-balance)
+            
+            ;; Execute proposal (transfer funds)
+            (try! (as-contract (stx-transfer? (get amount proposal) (as-contract tx-sender) (get target proposal))))
+            
+            ;; Mark proposal as executed
+            (map-set proposals proposal-id (merge proposal {executed: true}))
+            (ok true)
+        )
+    )
+)
+
+;; Read-only Functions
+(define-read-only (get-balance (account principal))
+    (ok (default-to u0 (map-get? balances account)))
+)
+
+(define-read-only (get-total-supply)
+    (ok (var-get total-supply))
+)
+
+(define-read-only (get-proposal (proposal-id uint))
+    (ok (map-get? proposals proposal-id))
+)
+
+(define-read-only (get-deposit-info (account principal))
+    (ok (map-get? deposits account))
+)
+
+(define-read-only (get-vote (proposal-id uint) (voter principal))
+    (ok (map-get? votes {proposal-id: proposal-id, voter: voter}))
+)
