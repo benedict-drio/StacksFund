@@ -52,7 +52,20 @@
 (define-data-var last-rebalance uint u0)
 (define-data-var proposal-count uint u0)
 
+(define-data-var reward-rate-per-block uint u1) ;; reward per token per block
+(define-map rewards
+    principal
+    uint ;; accumulated rewards
+)
+
+
 ;; Data Maps
+
+(define-map last-reward-block
+    principal
+    uint ;; last block rewards were calculated
+)
+
 (define-map balances principal uint)
 (define-map deposits
     principal
@@ -144,7 +157,7 @@
         (try! (check-initialized))
         (asserts! (>= amount (var-get minimum-deposit)) err-below-minimum)
         (asserts! (> amount u0) err-zero-amount)
-
+         (try! (update-rewards tx-sender))
         ;; Transfer STX to contract
         (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
         
@@ -164,6 +177,7 @@
     (begin
         (try! (check-initialized))
         (asserts! (> amount u0) err-zero-amount)
+         (try! (update-rewards tx-sender))
 
         (let (
             (deposit-info (unwrap! (map-get? deposits tx-sender) err-unauthorized))
@@ -278,6 +292,41 @@
         )
     )
 )
+
+(define-public (claim-rewards)
+    (begin
+        (try! (check-initialized))
+        (try! (update-rewards tx-sender))
+        (let ((reward (unwrap! (map-get? rewards tx-sender) u0)))
+            (asserts! (> reward u0) err-zero-amount)
+            
+            ;; Transfer STX or mint reward tokens as needed
+            (try! (stx-transfer? reward (as-contract tx-sender) tx-sender))
+            
+            ;; Reset rewards
+            (map-set rewards tx-sender u0)
+            (ok reward)
+        )
+    )
+)
+
+
+(define-private (update-rewards (account principal))
+    (let (
+        (balance (default-to u0 (map-get? balances account)))
+        (last-block (default-to stacks-block-height (map-get? last-reward-block account)))
+        (blocks-passed (- stacks-block-height last-block))
+    )
+        (when (> balance u0)
+            (let ((earned (* balance blocks-passed (var-get reward-rate-per-block))))
+                (map-set rewards account (+ earned (default-to u0 (map-get? rewards account))))
+            )
+        )
+        (map-set last-reward-block account stacks-block-height)
+        (ok true)
+    )
+)
+
 
 ;; Read-only Functions
 (define-read-only (get-balance (account principal))
